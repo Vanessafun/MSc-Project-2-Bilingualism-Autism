@@ -1,0 +1,402 @@
+---
+title: "Dissrtation2"
+author: "Wenyi Fang"
+date: "7/8/2020"
+output: html_document
+---
+
+#read data and library
+```{r }
+setwd("/Users/vanessafung/Desktop")
+data = readxl::read_xlsx("Raw Data.xlsx")
+Sys.setenv(LANGUAGE= "en")
+
+library(mice)
+library(miceadds)
+library(sirt)
+library(tidyverse)
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(magrittr)
+library(purrr)
+library(data.table)
+library(corrplot)
+library(FactoMineR)
+library(psych)
+library(lmtest)
+library(leaps)
+library(car)
+library(caret)
+library(e1071)
+library(MASS)
+library(lme4)
+library(ggplot2)
+library(sem)
+library(lavaan)
+```
+
+#EDA of raw data 
+```{r}
+head(data)
+str(data)
+
+#handle a weird number 
+data$pvt_mean_rt[which(data$pvt_mean_rt == "11.40.8333333")] = 1140.8333333
+data$pvt_mean_rt<-as.numeric(data$pvt_mean_rt)
+
+#change a varaibel name 
+names(data)[names(data) == "brief_raw_self-monitor"] <- "brief_raw_selfmonitor"
+
+hist(data_w_miss$tomi_compmean)
+hist(data_w_miss$et_falsebelief_testtrial_preference_score)
+```
+
+
+#missing value imputation
+```{r}
+#mark missing values as NA
+missindicator<- function(x){
+  x[which(x == 888)]<- NA
+  return(x)
+}
+#create data with NA 
+missdata<- data[,c(7:18,27:43)]
+missdata$wasi_sum_rawscores[which(missdata$wasi_sum_rawscores==0)]<-NA
+data_w_indicator = apply(missdata,2,missindicator)
+data_w_miss = as.data.frame(data_w_indicator)
+data_w_miss_b = data.frame(                   
+  data[, c(1:6,19:26)],data_w_miss)
+
+#missing pattern 
+md.pattern(data_w_miss)
+
+#missing mechanism
+library(MissMech)
+TestMCARNormality(data = data_w_miss_b[,15:21])
+TestMCARNormality(data = data_w_miss_b[,c(22:25,27:43)])
+#step 1 of multiple imputation--stochastic regression imputation 
+
+#*** imputation in mice
+imp_multi <- mice( data=as.matrix(data_w_miss), m=5, method = "pmm",seed = 1, print = FALSE)
+summary(imp_multi)
+
+# Store multiply imputed data
+data_imp_multi_all <- complete(imp_multi,      
+                           "repeated",
+                           include = TRUE)
+
+# Subset 5 imputated datasets (for convenience) 
+data_imp_1 <- data.frame(                   
+  data[, c(1:6,19:26)],data_imp_multi_all[ , seq(2,174,6)])#bind original compeleted variables and imputed variables
+
+data_imp_2 <- data.frame(                   
+  data[, c(1:6,19:26)],data_imp_multi_all[ , seq(3,174,6)])
+
+data_imp_3 <- data.frame(                   
+  data[, c(1:6,19:26)],data_imp_multi_all[ , seq(4,174,6)])
+
+data_imp_4 <- data.frame(                   
+  data[, c(1:6,19:26)],data_imp_multi_all[ , seq(5,174,6)])
+
+data_imp_5 <- data.frame(                   
+   data[, c(1:6,19:26)],data_imp_multi_all[ , seq(6,174,6)])
+
+#make sure each dataset have same variable names
+names(data_imp_1)[16]<-"wasi_sum_rawscores"
+names(data_imp_2)[16]<-"wasi_sum_rawscores"
+names(data_imp_3)[16]<-"wasi_sum_rawscores"
+names(data_imp_4)[16]<-"wasi_sum_rawscores"
+names(data_imp_5)[16]<-"wasi_sum_rawscores"
+
+#factorize diagnosis
+data_imp_1$diagnosis<-as.factor(data_imp_1$diagnosis)
+data_imp_2$diagnosis<-as.factor(data_imp_2$diagnosis)
+data_imp_3$diagnosis<-as.factor(data_imp_3$diagnosis)
+data_imp_4$diagnosis<-as.factor(data_imp_4$diagnosis)
+data_imp_5$diagnosis<-as.factor(data_imp_5$diagnosis)
+
+```
+
+#set1-PCA--construct composite value
+```{r}
+data_imp_1[,15]<-1/data_imp_1[,15]#transform time into speed
+data_imp_1.pca.language = princomp(scale(data_imp_1[,c(6,15)]), cor = TRUE, scores = TRUE)
+summary(data_imp_1.pca.language) # print variance accounted for
+language.prop.var  = c(0.8001294, 0.1998706)# a vector include proportion of variance
+composite.language.value<- data_imp_1.pca.language$scores%*%language.prop.var # a composite value bansed on variance weighted sum
+result1_1 <-
+  PCA(data_imp_1[, c(6, 15)])
+
+#do the same thing all again
+#social composite value,from tomi score and the et part, transform part of it to the higher the better group
+
+#define a variabel of interaction preference in a same style as et_falsebelief_testtrial_score, makes it the higher the more prefer to interact with people
+data_imp_1$et_figurestask_interaction_pref<- data_imp_1$et_figurestask_dwell_time_interacting.1-data_imp_1$et_figurestask_dwell_time_not_interacting.1
+
+data_imp_1.pc.social = princomp(scale(data_imp_1[,c(17:21,26,44)]), cor = TRUE, scores = TRUE)
+summary(data_imp_1.pc.social) 
+social1.prop.var = c(0.569070, 0.1511975, 0.1336298 ,0.0993863, 0.02800034 ,0.01508242,0.003633647)
+composite.social.value<-data_imp_1.pc.social$scores%*%social1.prop.var
+result2_1 <-
+  PCA(data_imp_1[, c(17:21,26)])
+
+#executivefunction1 composite value,the higher the better
+data_imp_1.pc.exec1  =princomp(scale(data_imp_1[,27:35]), cor = TRUE, scores = TRUE)
+summary(data_imp_1.pc.exec1)
+exec1.prop.var = c(0.6523326, 0.1123969, 0.06875442, 0.05405507, 0.03383426, 0.02781536 ,0.02200489,0.0177424, 0.0110641)
+composite.exec1.value = data_imp_1.pc.exec1$scores%*%exec1.prop.var
+
+#executivefunction2 composite value,the lower the better
+data_imp_1.pc.exec2 = princomp(scale(data_imp_1[,36:43]), cor = TRUE, scores = TRUE)
+summary(data_imp_1.pc.exec2)
+exec2.prop.var = c(0.5266147, 0.1851606, 0.1103769, 0.06961133, 0.06206898, 0.0260753 ,0.01435959,0.005732533)
+composite.exec2.value = data_imp_1.pc.exec2$scores%*%exec2.prop.var
+
+
+```
+
+
+
+#set1-exploratory before regression model
+```{r}
+#model for language vocabulary based on bilec variables
+#check independent variables are related or not
+corrplot(cor(data_imp_1[,c(7:12)]), order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+#scatter plot see untitled1
+
+
+```
+
+
+
+# regressionmodel
+```{r}
+#linear model for language moduel
+#bdiscard age acqusition or where english can lower GVIF,choose three bilec cause they are constructed on others or highly related and can represent them,include IQ cause it rectify hetero.
+composite.language.value.autis = composite.language.value[which(data_imp_1$diagnosis == 1)]
+model1<-lm( composite.language.value.autis~  bilec_english_input +  age_m + as.factor(where_english) + bilec_total_input + bilec_total_output, data = data_imp_1[which(data_imp_1$diagnosis == 1),])
+summary(model1)#age IQ and intercept signif
+vif(model1)# check no multicollinearity
+plot(model1)#indicate heteroscedasticity
+bptest(model1)#homo
+
+
+
+#model2 for social moduel
+#backward elimitation suggest--lm(formula = composite.social.value ~ as.factor(where_english) + as.factor(diagnosis) + poly(age_m, 2), data = data_imp_1), bilec choose for the same reason before.
+composite.social.value.autis = composite.social.value[which(data_imp_1$diagnosis == 1)]
+model2<-lm (composite.social.value.autis ~  bilec_english_input + bilec_total_input + bilec_total_output + as.factor(where_english) + age_m ,data= data_imp_1[which(data_imp_1$diagnosis == 1),]  )
+plot(model2)
+bptest(model2)#homo
+vif(model2)#toleratble multicollinearity
+summary(model2)#diag age and where english2 age signif
+
+
+
+#model3 for exec1 moduel,choose variable as the same process and reason before.
+model3_1<-lm (composite.exec1.value[which(data_imp_1$diagnosis == 1)] ~ bilec_english_input + bilec_total_input + bilec_total_output  + age_m  + as.factor(where_english),data= data_imp_1[which(data_imp_1$diagnosis == 1),]  )
+plot(model3_1)
+summary(model3_1)
+vif(model3_1)#toleratble multicollinearity
+bptest(model3_1)#homo
+
+model3_1_wo_where<-lm (composite.exec1.value ~ bilec_english_input + bilec_total_input + bilec_total_output  + as.factor(diagnosis)  + age_m  + as.factor(age_acquisition),data= data_imp_1  )
+plot(model3_1_wo_where)
+summary(model3_1_wo_where)#diag signif
+vif(model3_1_wo_where)#toleratble multicollinearity
+bptest(model3_1_wo_where)#homo
+
+#model for exec2 moduel
+model3_2<-lm (composite.exec2.value[which(data_imp_1$diagnosis == 1)] ~ bilec_english_input + bilec_total_input + bilec_total_output + as.factor(where_english) + age_m+ poly(wasi_sum_rawscores,2),data= data_imp_1[which(data_imp_1$diagnosis == 1),])
+summary(model3_2)
+plot(model3_2)
+vif(model3_2)#toleratble multicollinearity
+bptest(model3_2)# heteroscedasticity
+hist(composite.exec2.value)
+
+#fix hetero of model3_2
+execBCMod3_2 <- BoxCoxTrans(composite.exec2.value+1)
+print(execBCMod3_2)
+powerTransform <- function(y, lambda1, lambda2 = NULL, method = "boxcox") {
+
+  #define the boxcox transform function
+  boxcoxTrans <- function(x, lam1, lam2 = NULL) {
+
+    # if we set lambda2 to zero, it becomes the one parameter transformation
+    lam2 <- ifelse(is.null(lam2), 0, lam2)
+
+    if (lam1 == 0L) {
+      log(y + lam2)
+    } else {
+      (((y + lam2)^lam1) - 1) / lam1
+    }
+  }
+
+  switch(method
+         , boxcox = boxcoxTrans(y, lambda1, lambda2)
+         , tukey = y^lambda1
+  )
+}
+
+# create the transformed new dependent variable
+composite.exec2.value_new=powerTransform (composite.exec2.value+1,0.1) 
+summary(composite.exec2.value_new)
+
+#linear model for exec2 moduel-exclude outliers
+composite.exec2.value_new.b = composite.exec2.value_new[-c(74,84)]
+composite.exec2.value_new.b = composite.exec2.value_new.b[which(data_imp_1.b$diagnosis == 1)] 
+data_imp_1.b = data_imp_1[-c(74,84),] 
+data_imp_1.b = data_imp_1.b[which(data_imp_1.b$diagnosis==1),]
+
+#fit model
+model3_2_b<-lm (composite.exec2.value_new.b[which(data_imp_1.b$diagnosis == 1)]~ bilec_english_input + bilec_total_input + bilec_total_output + as.factor(where_english) +   age_m,data= data_imp_1.b[which(data_imp_1.b$diagnosis == 1),])
+summary(model3_2_b)
+
+#check model
+plot(model3_2_b)
+vif(model3_2_b)#toleratble multicollinearity
+ncvTest(model3_2_b)#homo
+bptest(model3_2_b)
+hist(composite.exec2.value_new)
+```
+
+#lmm
+```{r}
+#boxplot to find random effect
+theme_set(theme_bw(base_size = 18))
+
+boxp_input_language_1 = ggplot(
+  aes(
+    x = diagnosis,
+    y = composite.language,
+    group = diagnosis,
+    colour = diagnosis
+  ),
+  geom = "boxplot",
+  data = data_imp_1[-79, ]
+) + geom_boxplot() + geom_jitter(alpha = 0.3)+
+  theme_gray(base_size = 20)+
+  theme(legend.position = "none")#delete a impossible outlier, imputation cause it
+boxp_input_language_1
+
+#line plot
+composite.language = composite.language.value[-79]
+line_input_language_1 = qplot(
+  aes(x= bilec_total_input,
+  y = composite.language,group = diagnosis),colour = diagnosis,
+  geom = "lineplot",
+  data = data_imp_1[-79, ]
+)#delete a impossible outlier, imputation cause it 
+
+
+# fixed effect + random effect by subject
+fixef(res1_set1_language)['(Intercept)'] + ranef(res1_set1_language)$diagnosis
+summary(res1_set1_language)
+
+#add fixed model
+res2_set1_language = lmer(
+  composite.language.value ~ age_m + wasi_sum_rawscores + (1 | diagnosis), data = data_imp_1
+)
+summary(res2)
+
+anova(res2_set1_language,res1_set1_language)#res2 is better
+
+#fit3
+res3_set1_language = res3_set1_language = lmer(
+  composite.language.value ~ bilec_english_input + (1  | diagnosis), data = data_imp_1)
+summary(res3_set1_language)
+ranef(res3_set1_language)
+plot(res3_set1_language)
+isSingular(res3_set1_language)
+
+#fit4 delete random slope
+res4_set1_language = lmer(
+  composite.language.value ~  bilec_total_output + bilec_english_input + (1| diagnosis), data = data_imp_1)
+summary(res4_set1_language)
+ranef(res4_set1_language)
+
+anova(res3_set1_language,res4_set1_language)#no difference ,keep the simple res4
+
+#test linearity
+Plot.res4_set1_language.Linearity<-plot(composite.language.value,resid(res4_set1_language)) 
+
+#test hetero
+res4_set1_language.abs.res2<-(abs(residuals(res4_set1_language)))^2#extracts the residuals and places them in a new column in our original data table
+language.study = data.frame(cbind(res4_set1_language.abs.res2,part_no = data_imp_1$part_no))
+Levene.res4_set1_language <- lm(res4_set1_language.abs.res2 ~ part_no, data=language.study) #ANOVA of the squared residuals
+anova(Levene.res4_set1_language) #displays the results
+
+#test normality
+library(lattice)
+qqmath(res4_set1_language)#normality violated
+
+#fix hetero and non-normality
+library(boxcoxmix)
+min(composite.language.value)
+t = tolfind.boxcox(formula = (composite.language.value+3.7) ~ 1,find.k = c(2,8),steps.tol =15 ,model.selection = "aic", lambda=1,data = data_imp_1)
+t$aic;t$bic;t
+res4_set1_language.boxcox = optim.boxcox(formula = (composite.language.value+3.7) ~ age_m + bilec_total_input + bilec_total_output + bilec_english_input,group = data_imp_1$diagnosis, data = data_imp_1)#lambda= 1.8 
+
+np.boxcoxmix(formula = (composite.language.value+3.7) ~ age_m + bilec_total_input + bilec_total_output + bilec_english_input,group = data_imp_1$diagnosis, data = data_imp_1,lambda = 1.8)
+
+library(lmerTest)
+```
+
+
+#pool regression
+```{r}
+class(model1)
+pool_model1 = summary(pool(as.mira(list(model1,model1_set2,model1_set3,model1_set4,model1_set5))))
+pool_model1
+
+pool_model2 = summary(pool(as.mira(list(model2,model2_set2,model2_set3,model2_set4,model2_set5))))
+pool_model2
+
+pool_model3_1 = summary(pool(as.mira(list(model3_1,model3_1_set2,model3_1_set3,model3_1_set4,model3_1_set5))))
+pool_model3_1
+
+pool_model3_2 = summary(pool(as.mira(list(model3_2_b,model3_2_set2,model3_2_set3,model3_2_set4,model3_2_b_set5))))
+pool_model3_2
+```
+
+#set1-comfirmatary factor analysis for relationship between three dependent variables group
+```{r}
+# CFA Model
+
+#construct composite scores for exec func and bilec
+data_imp_1.pc.exec = princomp(scale(data_imp_1[,27:43]), cor = TRUE, scores = TRUE)
+summary(data_imp_1.pc.exec) 
+exec.prop.var = c(0.3851837, 0.2174541, 0.08825522, 0.06500323 ,0.04605719,0.03712173 ,0.0346895, 0.02932466, 0.0272811, 0.0143003,0.01319327 ,0.01162928, 0.009828389, 0.007610074 ,0.005700501,0.005137256 ,0.002230487)
+composite.exec.value<-data_imp_1.pc.exec$scores%*%exec.prop.var
+
+data_imp_1.pc.biling = princomp(scale(data_imp_1[,7:12]), cor = TRUE, scores = TRUE)
+summary(data_imp_1.pc.biling) 
+biling.prop.var = c(0.7275522, 0.1608668 ,0.08265281, 0.0274151, 0.001379084, 0.0001340109)
+composite.biling.value<-data_imp_1.pc.biling$scores%*%biling.prop.var
+
+composite_score_df = data.frame(cbind(composite.language.value,composite.social.value,composite.exec.value,composite.biling.value))
+composite_score.cov <- cov(composite_score_df)
+composite_score.cov
+
+#three factor 3 items CFA model
+m3a <- 'language =~ bpvs_raw 
+        social =~ tomi_compmean.1 + tom_tb_totalscore.1+ et_falsebelief_testtrial_preference_score.1 
+        exec =~  pvt_mean_rt.1 +
+'
+threefac3items_a <- cfa(m3a, data=data_imp_1,std.lv=TRUE) 
+summary(threefac3items_a, fit.measures=TRUE, standardized=TRUE)
+fitmeasures(threefac3items_a, c('cfi', 'rmsea', 'rmsea.ci.upper', 'bic'))
+
+#modification of three 3item model
+modifthree3_a = modificationindices(threefac3items_a) %>%
+  as_data_frame() %>%
+  arrange(-mi) %>%
+  filter(mi > 11)
+modifthree3_a[,1:5]
+
+
+names(data_imp_1)
+semPlot::semPaths(threefac3items_a)
+```
